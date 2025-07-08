@@ -1,4 +1,4 @@
-use std::{ os::raw::c_void, ptr::null_mut};
+use std::{os::raw::c_void, ptr::null_mut};
 
 use windows::{
     core::*,
@@ -19,6 +19,7 @@ struct Win32OffscreenBuffer {
     memory: *mut c_void
 }
 
+static mut GLOBAL_RUNNING: bool = false;
 static mut GLOBAL_BUFFER: *mut Win32OffscreenBuffer = null_mut();
 
 fn win32_get_window_dimension(window: HWND) ->  Result<Win32WindowDimension> {
@@ -122,6 +123,18 @@ unsafe extern "system" fn wnd_proc(
             }
             LRESULT(0)
         }
+        WM_CLOSE => {
+            unsafe {
+                GLOBAL_RUNNING = false;
+            }
+            LRESULT(0)
+        }
+        WM_QUIT => {
+            unsafe {
+                GLOBAL_RUNNING = false;
+            }
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
             println!("Key down: {:?}", wparam.0);
             LRESULT(0)
@@ -153,7 +166,7 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-fn render_gradient(buffer: &mut Win32OffscreenBuffer) {
+fn render_gradient(buffer: &mut Win32OffscreenBuffer, x_offset: i32, y_offset: i32) {
     let pixel_ptr = buffer.memory as *mut u32;
     unsafe {
         // Fill with gradient
@@ -168,8 +181,8 @@ fn render_gradient(buffer: &mut Win32OffscreenBuffer) {
                     in 32bit Register     : xx RR GG BB
                     this is why void pointer is cast to u32 to fill it and move to next pixel
                 */
-                let b = x as u8;
-                let g = y as u8;
+                let b = (x + x_offset) as u8;
+                let g = (y + y_offset) as u8;
                 let r = 0u8;
                 let a = 255u8;
                 let pixel = (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | (b as u32);
@@ -217,17 +230,25 @@ fn main() -> Result<()> {
         );
 
         if let Ok(window) = hwnd {
+            GLOBAL_RUNNING = true;
+
+            let mut x_anim = 0;
+            let mut y_anim = 0;
             let dc = GetDC(Some(window));
 
             let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).into() {
-                let _ = TranslateMessage(&msg);
-                let _ = DispatchMessageW(&msg);
-
-
-                render_gradient(&mut *GLOBAL_BUFFER);
+            while GLOBAL_RUNNING {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).into() {
+                    let _ = TranslateMessage(&msg);
+                    let _ = DispatchMessageW(&msg);
+                }
+                render_gradient(&mut *GLOBAL_BUFFER, x_anim, y_anim);
                 let dimension = win32_get_window_dimension(window).expect("Failed GetRect from windows");
                 win32_display_buffer_in_window(dc, &*GLOBAL_BUFFER, dimension.width, dimension.height);
+
+                // test animation to make sure render buffer update and main loop is working
+                x_anim += 1;
+                y_anim += 2;
             }
         }
     }
