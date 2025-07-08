@@ -195,6 +195,7 @@ fn main() -> Result<()> {
             hInstance: h_instance.into(),
             lpszClassName: class_name,
             lpfnWndProc: Some(wnd_proc),
+            style: CS_VREDRAW|CS_HREDRAW,
             ..Default::default()
         };
 
