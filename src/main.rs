@@ -26,16 +26,12 @@ fn win32_get_window_dimension(window: HWND) ->  Result<Win32WindowDimension> {
         let mut client_rect  = RECT {
             ..Default::default()
         };
-        match GetClientRect(window, &mut client_rect) {
-            Ok(_) => {
-                let dimension = Win32WindowDimension {
-                    width: client_rect.right - client_rect.left,
-                    height: client_rect.bottom - client_rect.top
-                };
-                Ok(dimension)
-            }
-            Err(e) => Err(e)
-        }
+        let _ = GetClientRect(window, &mut client_rect)?;
+        let dimension = Win32WindowDimension {
+            width: client_rect.right - client_rect.left,
+            height: client_rect.bottom - client_rect.top
+        };
+        Ok(dimension)
     }
 }
 
