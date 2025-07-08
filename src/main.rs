@@ -93,10 +93,10 @@ fn win32_resize_dib_section(buffer: &mut Win32OffscreenBuffer, width: i32, heigh
     return back_buffer
 }
 
-fn win32_display_buffer_in_window(deviceContext: HDC, buffer: &Win32OffscreenBuffer, window_width: i32, window_height: i32) {
+fn win32_display_buffer_in_window(device_context: HDC, buffer: &Win32OffscreenBuffer, window_width: i32, window_height: i32) {
     unsafe {
         StretchDIBits(
-            deviceContext,
+            device_context,
             0,
             0,
             window_width,
