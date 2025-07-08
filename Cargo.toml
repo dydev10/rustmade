@@ -1,0 +1,17 @@
+[package]
+name = "rustmade"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.windows]
+version = "0.60.0"
+features = [
+    "Graphics",
+    "System",
+    "UI_Composition_Desktop",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_WinRT_Composition",
+    "Win32_UI_WindowsAndMessaging",
+]
