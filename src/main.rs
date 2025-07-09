@@ -1,9 +1,49 @@
-use std::{os::raw::c_void, ptr::null_mut};
+use std::{os::raw::c_void, ptr::null_mut, sync::{Mutex, OnceLock}};
 
 use windows::{
     core::*,
-    Win32::{Foundation::*, Graphics::Gdi::*, System::{LibraryLoader::*, Memory::{VirtualAlloc, VirtualFree, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE}}, UI::WindowsAndMessaging::*},
+    Win32::{Foundation::*, Graphics::Gdi::*, System::{LibraryLoader::*, Memory::{VirtualAlloc, VirtualFree, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE}}, UI::{Input::XboxController::*, WindowsAndMessaging::*}},
 };
+
+// TODO: these GamepadX structs should be defined in core game code, not platform layer
+#[derive(Default)]
+struct GamepadButtons {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    start: bool,
+    back: bool,
+    l_thumb: bool,
+    r_thumb: bool,
+    l_shoulder: bool,
+    r_shoulder: bool,
+    a: bool,
+    b: bool,
+    x: bool,
+    y: bool,
+}
+
+#[derive(Default)]
+struct GamepadTriggers {
+    l_trigger: u8,
+    r_trigger: u8,
+}
+
+#[derive(Default)]
+struct GamepadSticks {
+    l_stick_x: i16,
+    l_stick_y: i16,
+    r_stick_x: i16,
+    r_stick_y: i16,
+}
+
+#[derive(Default)]
+struct GamepadState {
+    buttons: GamepadButtons,
+    triggers: GamepadTriggers,
+    sticks: GamepadSticks,
+}
 
 struct Win32WindowDimension {
     width: i32,
@@ -21,6 +61,7 @@ struct Win32OffscreenBuffer {
 
 static mut GLOBAL_RUNNING: bool = false;
 static mut GLOBAL_BUFFER: *mut Win32OffscreenBuffer = null_mut();
+static GLOBAL_GAMEPAD_0: OnceLock<Mutex<GamepadState>> = OnceLock::new();
 
 fn win32_get_window_dimension(window: HWND) ->  Result<Win32WindowDimension> {
     unsafe {
@@ -192,7 +233,70 @@ fn render_gradient(buffer: &mut Win32OffscreenBuffer, x_offset: i32, y_offset: i
     }
 }
 
+/*
+    called every frame to read the latest controller state
+
+    TODO: use dynamic linking of xinput1_x.dll, 1_4 is linked by windows crate but only 1_3 or other version may be available on older windows
+*/
+fn read_controller_state() {
+    // TODO: either track more controller states or remove this loop to just read first controller
+    // second controller will overwrite the inputs if connected
+    for controller_index in 0..XUSER_MAX_COUNT {
+        let mut controller_state: XINPUT_STATE = XINPUT_STATE::default();
+        unsafe {
+            // ERROR_SUCCESS means success in windows api
+            if XInputGetState(controller_index, &mut controller_state) == ERROR_SUCCESS.0 {
+                // TODO: check if controllerState.dwPacketNumber is not increasing too much, should be same or +1(or very very low if not 1) for each poll
+                let gamepad: XINPUT_GAMEPAD = controller_state.Gamepad;
+                let mut gamepad_state = GLOBAL_GAMEPAD_0.get().expect("Gamepad state not initialized")
+                                                                        .lock().expect("failed to lock gamepad state before updating");
+
+                gamepad_state.buttons.up = (gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP).0 > 0;
+                gamepad_state.buttons.down = (gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN).0 > 0;
+                gamepad_state.buttons.left = (gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT).0 > 0;
+                gamepad_state.buttons.right = (gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT).0 > 0;
+                gamepad_state.buttons.start = (gamepad.wButtons & XINPUT_GAMEPAD_START).0 > 0;
+                gamepad_state.buttons.back = (gamepad.wButtons & XINPUT_GAMEPAD_BACK).0 > 0;
+                gamepad_state.buttons.l_thumb = (gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB).0 > 0;
+                gamepad_state.buttons.r_thumb = (gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB).0 > 0;
+                gamepad_state.buttons.l_shoulder = (gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER).0 > 0;
+                gamepad_state.buttons.r_shoulder = (gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER).0 > 0;
+                gamepad_state.buttons.a = (gamepad.wButtons & XINPUT_GAMEPAD_A).0 > 0;
+                gamepad_state.buttons.b = (gamepad.wButtons & XINPUT_GAMEPAD_B).0 > 0;
+                gamepad_state.buttons.x = (gamepad.wButtons & XINPUT_GAMEPAD_X).0 > 0;
+                gamepad_state.buttons.y = (gamepad.wButtons & XINPUT_GAMEPAD_Y).0 > 0;
+            
+
+                gamepad_state.triggers.l_trigger = gamepad.bLeftTrigger;
+                gamepad_state.triggers.r_trigger = gamepad.bRightTrigger;
+
+                gamepad_state.sticks.l_stick_x = gamepad.sThumbLX;
+                gamepad_state.sticks.l_stick_y = gamepad.sThumbLY;
+                gamepad_state.sticks.r_stick_x = gamepad.sThumbRX;
+                gamepad_state.sticks.r_stick_y = gamepad.sThumbRY;
+ 
+                // debug print to test buttons
+                if gamepad_state.buttons.a {
+                    print!("Gamepad button A pressed\n")
+                }
+
+                if gamepad_state.triggers.l_trigger > 100 {
+                    println!("{:?}", gamepad_state.triggers.l_trigger);
+                }
+
+                // TODO: Check why using abs() causes panic for negative x
+                if gamepad_state.sticks.l_stick_x.abs() > i16::MAX/4 {
+                    println!("{:?}", gamepad_state.sticks.l_stick_x);
+                }
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    // TODO: add support for more controllers, only first controller supported for now
+    GLOBAL_GAMEPAD_0.get_or_init(|| Mutex::new(GamepadState::default()));
+
     unsafe {
         let default_width = 1280;
         let default_height = 720;
@@ -242,6 +346,11 @@ fn main() -> Result<()> {
                     let _ = TranslateMessage(&msg);
                     let _ = DispatchMessageW(&msg);
                 }
+
+                // poll controller state
+                read_controller_state();
+
+                // render every frame at the end
                 render_gradient(&mut *GLOBAL_BUFFER, x_anim, y_anim);
                 let dimension = win32_get_window_dimension(window).expect("Failed GetRect from windows");
                 win32_display_buffer_in_window(dc, &*GLOBAL_BUFFER, dimension.width, dimension.height);
@@ -249,6 +358,15 @@ fn main() -> Result<()> {
                 // test animation to make sure render buffer update and main loop is working
                 x_anim += 1;
                 y_anim += 2;
+
+                // test global gamepad state
+                if let Some(mutex) = GLOBAL_GAMEPAD_0.get() {
+                    let gamepad_state = mutex.lock().expect("cannot lock gamepad state for reading");
+                    if gamepad_state.buttons.y {
+                        // increase y scrolling animation speed
+                        y_anim += 10;
+                    }
+                }
             }
         }
     }
